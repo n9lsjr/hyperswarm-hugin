@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events')
-const DHT = require('hyperdht')
+const DHT = require('hyperdht-hugin')
 const spq = require('shuffled-priority-queue')
 const b4a = require('b4a')
 const unslab = require('unslab')
@@ -11,15 +11,15 @@ const PeerDiscovery = require('./lib/peer-discovery')
 
 const MAX_PEERS = 64
 const MAX_PARALLEL = 3
-const MAX_CLIENT_CONNECTIONS = Infinity // TODO: Change
-const MAX_SERVER_CONNECTIONS = Infinity
+const MAX_CLIENT_CONNECTIONS = 100 // TODO: Change
+const MAX_SERVER_CONNECTIONS = 100
 
 const ERR_MISSING_TOPIC = 'Topic is required and must be a 32-byte buffer'
 const ERR_DESTROYED = 'Swarm has been destroyed'
 const ERR_DUPLICATE = 'Duplicate connection'
 
 module.exports = class Hyperswarm extends EventEmitter {
-  constructor (opts = {}) {
+  constructor (opts, sig, dht_keys, keychain = {}) {
     super()
     const {
       seed,
@@ -36,7 +36,12 @@ module.exports = class Hyperswarm extends EventEmitter {
     this.dht = opts.dht || new DHT({
       bootstrap: opts.bootstrap,
       nodes: opts.nodes
-    })
+    }, sig, dht_keys, keychain)
+
+    this.keyPair = dht_keys.get()
+    this.keychain = keychain.get()
+    this.checkedSigs = [sig]
+
     this.server = this.dht.createServer({
       firewall: this._handleFirewall.bind(this),
       relayThrough: this._maybeRelayConnection.bind(this)
@@ -259,12 +264,24 @@ module.exports = class Hyperswarm extends EventEmitter {
   _handleFirewall (remotePublicKey, payload) {
     if (this.suspended) return true
     if (b4a.equals(remotePublicKey, this.keyPair.publicKey)) return true
-
+  
     const peerInfo = this.peers.get(b4a.toString(remotePublicKey, 'hex'))
     if (peerInfo && peerInfo.banned) return true
 
+    if (payload !== null) {
+      if (!payload.mid) return true
+        const checked = this.checkSignature(payload.mid, remotePublicKey)
+        if (!checked) return true
+        //This id is already in use
+        if (this.checkedSigs.some(a => a === payload.mid)) return true
+      }
+
     return this._firewall(remotePublicKey, payload)
   }
+
+  checkSignature(signature, remotePublicKey) {
+    return this.keychain.verify(remotePublicKey, signature, this.keychain.publicKey)
+   }
 
   _handleServerConnectionSwap (existing, conn) {
     let closed = false
