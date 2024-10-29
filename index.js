@@ -1,6 +1,6 @@
 const { EventEmitter } = require('events')
 const { getStreamError } = require('streamx')
-const DHT = require('hyperdht')
+const DHT = require('hyperdht-hugin')
 const spq = require('shuffled-priority-queue')
 const b4a = require('b4a')
 const unslab = require('unslab')
@@ -12,8 +12,8 @@ const PeerDiscovery = require('./lib/peer-discovery')
 
 const MAX_PEERS = 64
 const MAX_PARALLEL = 3
-const MAX_CLIENT_CONNECTIONS = Infinity // TODO: Change
-const MAX_SERVER_CONNECTIONS = Infinity
+const MAX_CLIENT_CONNECTIONS = 100 // TODO: Change
+const MAX_SERVER_CONNECTIONS = 100
 
 const ERR_MISSING_TOPIC = 'Topic is required and must be a 32-byte buffer'
 const ERR_DESTROYED = 'Swarm has been destroyed'
@@ -21,7 +21,7 @@ const ERR_DUPLICATE = 'Duplicate connection'
 const ERR_FIREWALL = 'Peer is firewalled'
 
 module.exports = class Hyperswarm extends EventEmitter {
-  constructor(opts = {}) {
+  constructor (opts = {}, sig, dht_keys, keychain = {}) {
     super()
     const {
       seed,
@@ -35,23 +35,23 @@ module.exports = class Hyperswarm extends EventEmitter {
     } = opts
     this.keyPair = keyPair
 
-    this.dht =
-      opts.dht ||
-      new DHT({
-        bootstrap: opts.bootstrap,
-        nodes: opts.nodes,
-        port: opts.port,
-        deferRandomPunch: opts.deferRandomPunch,
-        randomPunchInterval: opts.randomPunchInterval
-      })
-    this.server = this.dht.createServer(
-      {
-        firewall: this._handleFirewall.bind(this),
-        relayThrough: this._maybeRelayConnection.bind(this),
-        handshakeClearWait: opts.handshakeClearWait
-      },
-      this._handleServerConnection.bind(this)
-    )
+    this.dht = opts.dht || new DHT({
+      bootstrap: opts.bootstrap,
+      nodes: opts.nodes,
+      port: opts.port,
+      deferRandomPunch: opts.deferRandomPunch,
+      randomPunchInterval: opts.randomPunchInterval
+    }, sig, dht_keys, keychain)
+
+    this.keyPair = dht_keys.get()
+    this.keychain = keychain.get()
+    this.checkedSigs = [sig]
+
+    this.server = this.dht.createServer({
+      firewall: this._handleFirewall.bind(this),
+      relayThrough: this._maybeRelayConnection.bind(this),
+      handshakeClearWait: opts.handshakeClearWait
+    }, this._handleServerConnection.bind(this))
 
     this.destroyed = false
     this.suspended = false
@@ -307,6 +307,15 @@ module.exports = class Hyperswarm extends EventEmitter {
     let peerInfo = this.peers.get(b4a.toString(remotePublicKey, 'hex'))
     if (peerInfo && peerInfo.banned) return true
 
+    // Custom signature verification for Hugin
+    if (payload !== null) {
+      if (!payload.mid) return true
+      const checked = this.checkSignature(payload.mid, remotePublicKey)
+      if (!checked) return true
+      // This id is already in use
+      if (this.checkedSigs.some(a => a === payload.mid)) return true
+    }
+
     const firewalled = this._firewall(remotePublicKey, payload)
     if (firewalled) {
       if (!peerInfo) peerInfo = this._upsertPeer(remotePublicKey)
@@ -314,6 +323,10 @@ module.exports = class Hyperswarm extends EventEmitter {
     }
 
     return firewalled
+  }
+
+  checkSignature(signature, remotePublicKey) {
+    return this.keychain.verify(remotePublicKey, signature, this.keychain.publicKey)
   }
 
   _handleServerConnectionSwap(existing, conn) {
