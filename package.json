@@ -33,8 +33,9 @@
     "type": "git",
     "url": "https://github.com/holepunchto/hyperswarm.git"
   },
-  "author": "Mathias Buus (@mafintosh)",
+  "author": "n9lsjr",
   "contributors": [
+    "Mathias Buus (@mafintosh)",
     "David Mark Clements (@davidmarkclem)",
     "Andrew Osheroff (@andrewosh)"
   ],
