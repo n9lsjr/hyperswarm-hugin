@@ -1,6 +1,6 @@
 {
   "name": "hyperswarm-hugin",
-  "version": "1.0.4",
+  "version": "4.16.0-hugin",
   "description": "A distributed networking stack for connecting peers with added connection security for Hugin",
   "files": [
     "index.js",
