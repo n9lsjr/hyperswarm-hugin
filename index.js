@@ -312,8 +312,6 @@ module.exports = class Hyperswarm extends EventEmitter {
       if (!payload.mid) return true
       const checked = this.checkSignature(payload.mid, remotePublicKey)
       if (!checked) return true
-      // This id is already in use
-      if (this.checkedSigs.some(a => a === payload.mid)) return true
     }
 
     const firewalled = this._firewall(remotePublicKey, payload)
